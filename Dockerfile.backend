@@ -1,0 +1,50 @@
+# Backend Dockerfile - FastAPI/Uvicorn for GraphRAG
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies needed by OpenCV, pdf2image and pytesseract
+# - libgl1, libglvnd0: provides libGL.so.1 for OpenCV
+# - libglib2.0-0, libsm6, libxrender1, libxext6: common X11 deps for cv2 and plotting
+# - poppler-utils: provides pdftoppm for pdf2image
+# - tesseract-ocr and tesseract-ocr-eng: OCR engine and English language pack
+# - build-essential and pkg-config: for compiling any native wheels if needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    pkg-config \
+    curl \
+    libgl1 \
+    libglvnd0 \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements-docker.txt .
+RUN pip install --no-cache-dir -r requirements-docker.txt
+
+# Copy the application code
+COPY . .
+
+# Create a non-root user for security
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Run the FastAPI application
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

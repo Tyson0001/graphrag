@@ -1,0 +1,14 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.next/
+node_modules/
+data/
+*.pdf
+*.log
+.venv/
+frontend/node_modules/
+node_modules/
+.env.docker
+./env.*
