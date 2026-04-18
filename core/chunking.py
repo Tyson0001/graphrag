@@ -18,15 +18,78 @@ class DocumentChunker:
 
     def __init__(self):
         """Initialize the document chunker."""
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
             separators=["\n\n", "\n", " ", ""],
         )
 
+        try:
+            import spacy
+            self._nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+            self._nlp.add_pipe("sentencizer")
+            self._use_sentence_aware = True
+            logger.info("Initialized spaCy for sentence-aware chunking")
+        except Exception as e:
+            logger.warning(f"Failed to initialize spaCy: {e}. Falling back to standard splitter.")
+            self._use_sentence_aware = False
+
         # OCR and quality settings
         self.enable_quality_filtering = True
         self.enable_ocr_enhancement = True
+
+    def _sentence_aware_split(self, text: str) -> List[str]:
+        """Split text into chunks while preserving sentence boundaries."""
+        if not text.strip():
+            return []
+            
+        doc = self._nlp(text)
+        sentences = [s.text for s in doc.sents]
+        
+        chunks = []
+        current_chunk = []
+        current_len = 0
+        
+        for sent in sentences:
+            sent_len = len(sent)
+            
+            # If a single sentence exceeds chunk_size, split it using standard splitter
+            if sent_len > settings.chunk_size:
+                if current_chunk:
+                    chunks.append(" ".join(current_chunk))
+                    
+                # Split the long sentence
+                sub_chunks = self.text_splitter.split_text(sent)
+                chunks.extend(sub_chunks)
+                
+                # Reset for next sentence
+                current_chunk = []
+                current_len = 0
+                continue
+                
+            if current_len + sent_len > settings.chunk_size and current_chunk:
+                chunks.append(" ".join(current_chunk))
+                
+                # Overlap: keep last N chars worth of sentences
+                overlap_sents = []
+                overlap_len = 0
+                for s in reversed(current_chunk):
+                    if overlap_len + len(s) <= settings.chunk_overlap:
+                        overlap_sents.insert(0, s)
+                        overlap_len += len(s)
+                    else:
+                        break
+                current_chunk = overlap_sents
+                current_len = overlap_len
+                
+            current_chunk.append(sent)
+            current_len += sent_len
+            
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+            
+        return chunks
 
     def chunk_text(
         self,
@@ -60,7 +123,11 @@ class DocumentChunker:
                 else self.enable_ocr_enhancement
             )
 
-            chunks = self.text_splitter.split_text(text)
+            if self._use_sentence_aware:
+                chunks = self._sentence_aware_split(text)
+            else:
+                chunks = self.text_splitter.split_text(text)
+                
             chunk_data = []
             processed_chunks = 0
             filtered_chunks = 0

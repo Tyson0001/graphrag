@@ -12,6 +12,9 @@ from core.embeddings import embedding_manager
 from core.graph_db import PathResult, graph_db
 from rag.nodes.query_analysis import analyze_query
 
+from rank_bm25 import BM25Okapi
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -189,6 +192,57 @@ class DocumentRetriever:
             )
 
         return entity_ids
+
+    async def bm25_retrieval(
+        self,
+        query: str,
+        top_k: int = 20,
+        allowed_document_ids: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Sparse keyword retrieval via BM25 over all chunk content."""
+        try:
+            # Fetch all chunk content from Neo4j (cached per session ideally)
+            with graph_db._get_driver().session() as session:
+                results = session.run(
+                    """
+                    MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
+                    RETURN c.id as chunk_id, c.content as content,
+                           d.id as document_id, d.filename as document_name
+                    """
+                ).data()
+
+            if not results:
+                return []
+
+            # Apply document filter
+            if allowed_document_ids:
+                allowed = set(allowed_document_ids)
+                results = [r for r in results if r.get("document_id") in allowed]
+
+            if not results:
+                return []
+
+            tokenized_corpus = [r["content"].lower().split() for r in results]
+            bm25 = BM25Okapi(tokenized_corpus)
+            query_tokens = query.lower().split()
+            scores = bm25.get_scores(query_tokens)
+
+            # Sort by BM25 score
+            ranked_indices = np.argsort(scores)[::-1][:top_k]
+            bm25_results = []
+            for idx in ranked_indices:
+                if scores[idx] > 0:
+                    chunk = dict(results[idx])
+                    # Normalize score for RRF/ranking (relative to max score)
+                    chunk["similarity"] = float(scores[idx]) / (float(scores[ranked_indices[0]]) + 1e-9)
+                    chunk["retrieval_mode"] = "bm25"
+                    bm25_results.append(chunk)
+
+            logger.info(f"BM25 retrieval returned {len(bm25_results)} results")
+            return bm25_results
+        except Exception as e:
+            logger.error(f"BM25 retrieval failed: {e}")
+            return []
 
     async def chunk_based_retrieval(
     self,
@@ -795,6 +849,9 @@ class DocumentRetriever:
             entity_results = await self.entity_based_retrieval(
                 query, entity_count, allowed_document_ids=allowed_document_ids
             )
+            bm25_results = await self.bm25_retrieval(
+                query, top_k=top_k, allowed_document_ids=allowed_document_ids
+            )
 
             path_results = []
             if effective_use_multi_hop:
@@ -903,6 +960,22 @@ class DocumentRetriever:
                 if chunk_id in combined_results:
                     combined_results[chunk_id]["rrf_score"] = rrf_chunk.get("rrf_score", 0.0)
                     combined_results[chunk_id]["hybrid_score"] = rrf_chunk.get("rrf_score", 0.0)
+
+            # Step 1: RRF fusion across all four retrieval lists
+            rrf_results = reciprocal_rank_fusion(
+                result_lists=[chunk_results, entity_results, bm25_results, path_results],
+                weights=[0.40, 0.25, 0.20, 0.15],
+            )
+
+            # Merge RRF scores into combined_results
+            for rrf_chunk in rrf_results:
+                chunk_id = rrf_chunk.get("chunk_id")
+                if chunk_id in combined_results:
+                    combined_results[chunk_id]["rrf_score"] = rrf_chunk.get("rrf_score", 0.0)
+                    combined_results[chunk_id]["hybrid_score"] = rrf_chunk.get("rrf_score", 0.0)
+                else:
+                    # Chunks from BM25 might not be in combined_results yet
+                    combined_results[chunk_id] = rrf_chunk
 
             # Step 2: Neural re-ranking on top RRF results
             rrf_ranked = sorted(combined_results.values(), key=lambda x: x.get("rrf_score", 0.0), reverse=True)

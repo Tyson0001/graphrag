@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Embedding Configuration
     embedding_model: str = Field(
-        default="text-embedding-ada-002", description="Embedding model"
+        default="text-embedding-3-large", description="Embedding model"
     )
     # Number of concurrent embedding requests
     embedding_concurrency: int = Field(default=3, description="Embedding concurrency")
@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     llm_delay_max: float = Field(default=1.0, description="Maximum delay between LLM requests")
 
     # Document Processing Configuration
-    chunk_size: int = Field(default=700, description="Document chunk size")
-    chunk_overlap: int = Field(default=120, description="Document chunk overlap")
+    chunk_size: int = Field(default=1200, description="Document chunk size")
+    chunk_overlap: int = Field(default=300, description="Document chunk overlap")
 
     # Similarity Configuration
     similarity_threshold: float = Field(default=0.7, description="Similarity threshold")
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
 
     # Retrieval Configuration
     min_retrieval_similarity: float = Field(
-        default=0.1, description="Minimum similarity for chunk retrieval"
+        default=0.25, description="Minimum similarity for chunk retrieval"
     )
     hybrid_chunk_weight: float = Field(
         default=0.6, description="Weight for chunk-based results"
@@ -108,13 +108,13 @@ class Settings(BaseSettings):
         default=500, description="Maximum number of chunks after expansion"
     )
     max_entity_connections: int = Field(
-        default=20, description="Maximum entity connections to follow"
+        default=30, description="Maximum entity connections to follow"
     )
     max_chunk_connections: int = Field(
         default=10, description="Maximum chunk similarity connections to follow"
     )
     expansion_similarity_threshold: float = Field(
-        default=0.1, description="Minimum similarity for expansion"
+        default=0.3, description="Minimum similarity for expansion"
     )
     max_expansion_depth: int = Field(
         default=2, description="Maximum depth for graph traversal"

@@ -49,18 +49,23 @@ def reason_with_graph(
 
         # Find related chunks through graph traversal
         seen_chunk_ids = {chunk.get("chunk_id") for chunk in retrieved_chunks}
+        
+        # NEW: Dynamic depth based on query complexity
+        query_type = query_analysis.get("query_type", "factual")
+        max_depth = 3 if query_type in ("analytical", "comparative") else 2
 
-        for chunk in retrieved_chunks[:3]:  # Only expand from top 3 chunks
+        for chunk in retrieved_chunks[:6]:  # Increased: expansion from top 6 chunks
             chunk_id = chunk.get("chunk_id")
             if not chunk_id:
                 continue
 
             try:
                 # Get chunks related through graph relationships
+                # Added MENTIONS for better coverage
                 related_chunks = graph_db.get_related_chunks(
                     chunk_id=chunk_id,
-                    relationship_types=["SIMILAR_TO", "HAS_CHUNK"],
-                    max_depth=2,  # Keep it shallow for performance
+                    relationship_types=["SIMILAR_TO", "HAS_CHUNK", "MENTIONS"],
+                    max_depth=max_depth,
                 )
 
                 # Add unique related chunks
@@ -76,8 +81,8 @@ def reason_with_graph(
                         enhanced_chunks.append(related_chunk)
                         seen_chunk_ids.add(related_id)
 
-                        # Limit total chunks to prevent overwhelming the LLM
-                        if len(enhanced_chunks) >= 10:
+                        # Increased limit from 10 to 25 to prevent overwhelming but allow better coverage
+                        if len(enhanced_chunks) >= 25:
                             break
 
             except Exception as e:

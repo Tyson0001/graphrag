@@ -19,7 +19,7 @@ async def retrieve_documents_async(
     query: str,
     query_analysis: Dict[str, Any],
     retrieval_mode: str = "hybrid",
-    top_k: int = 8,
+    top_k: int = 20,
     chunk_weight: float = 0.5,
     graph_expansion: bool = True,
     use_multi_hop: bool = False,
@@ -58,10 +58,10 @@ async def retrieve_documents_async(
         adjusted_top_k = top_k
         adjustment_reason = None
         if complexity == "complex" or requires_multiple:
-            adjusted_top_k = min(top_k + 5, 15)
+            adjusted_top_k = min(top_k + 10, 35)
             adjustment_reason = "complexity or multiple sources required"
         elif query_type == "comparative":
-            adjusted_top_k = min(top_k + 8, 20)
+            adjusted_top_k = min(top_k + 15, 40)
             adjustment_reason = "comparative query"
 
         # Log why top_k was adjusted (if it changed)
@@ -137,7 +137,7 @@ def retrieve_documents(
     query: str,
     query_analysis: Dict[str, Any],
     retrieval_mode: str = "hybrid",
-    top_k: int = 5,
+    top_k: int = 20,
     chunk_weight: float = 0.5,
     graph_expansion: bool = True,
     use_multi_hop: bool = False,

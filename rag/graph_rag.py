@@ -112,13 +112,32 @@ class GraphRAG:
                 state.get("query", ""),
                 state.get("query_analysis", {}),
                 state.get("retrieval_mode", "graph_enhanced"),
-                state.get("top_k", 5),
+                state.get("top_k", 20),
                 chunk_weight=chunk_weight,
                 graph_expansion=graph_expansion,
                 use_multi_hop=use_multi_hop,
                 context_documents=state.get("context_documents", []),
             )
             
+            # NEW: Zero-result fallback using BM25 with wider scope
+            if not state["retrieved_chunks"]:
+                logger.warning("Primary retrieval returned 0 results, trying BM25-only fallback")
+                from rag.retriever import document_retriever
+                # retrieve_documents is sync, so we can use document_retriever.bm25_retrieval directly if we wrap it properly or call its sync version (none exists yet, so we use retrieve_documents_async or run_in_executor)
+                # For simplicity here, we assume retrieve_documents (which is sync) should handle it, but it doesn't have a bm25 only mode yet. 
+                # Let's import the retriever and run its async bm25 call synchronously.
+                import asyncio
+                try:
+                    state["retrieved_chunks"] = asyncio.run(
+                        document_retriever.bm25_retrieval(state.get("query", ""), top_k=30)
+                    )
+                    if state["retrieved_chunks"]:
+                        logger.info(f"Fallback retrieval found {len(state['retrieved_chunks'])} results")
+                        if state.get("stage_callback"):
+                            state["stage_callback"]("fallback_retrieval")
+                except Exception as fallback_err:
+                    logger.error(f"Fallback retrieval failed: {fallback_err}")
+
             return state
         except Exception as e:
             logger.error(f"Document retrieval failed: {e}")
