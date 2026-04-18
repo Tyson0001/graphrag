@@ -1,0 +1,44 @@
+[
+    {
+        "question": "What are the potential roles for someone with Regulatory Affairs and Brand Marketing skills?",
+        "answer": "Potential roles include Regulatory Affairs Manager, Compliance Specialist, Brand Marketing Coordinator, IT Project Manager, Business Analyst, and Technical Lead.",
+        "contexts": [
+            "potential_roles: Regulatory Affairs Manager, Compliance Specialist, Brand Marketing Coordinator.",
+            "potential_roles: IT Project Manager, Business Analyst, Technical Lead."
+        ],
+        "ground_truth": "Potential roles include Regulatory Affairs Manager, Compliance Specialist, Brand Marketing Coordinator, IT Project Manager, Business Analyst, and Technical Lead."
+    },
+    {
+        "question": "What soft skills do candidates with regulatory affairs experience have?",
+        "answer": "Candidates with regulatory affairs experience have soft skills of Research (Competent), Advising (Competent), and Analytical Thinking (Advanced Beginner).",
+        "contexts": [
+            "soft_skills: Research (Competent), Advising (Competent), Analytical Thinking (Advanced Beginner).",
+            "soft_skills: Research (Competent), Advising (Competent), Awareness (Advanced Beginner)."
+        ],
+        "ground_truth": "Soft skills include Research (Competent), Advising (Competent), and Analytical Thinking (Advanced Beginner)."
+    },
+    {
+        "question": "What secondary skills do candidates with FDA knowledge have?",
+        "answer": "Candidates with FDA knowledge have secondary skills of Environmental Awareness (Beginner), Social Awareness (Beginner), and Westlaw (Beginner).",
+        "contexts": [
+            "secondary_skills: Environmental Awareness (Beginner), Social Awareness (Beginner), Westlaw (Beginner)."
+        ],
+        "ground_truth": "Secondary skills include Environmental Awareness (Beginner), Social Awareness (Beginner), and Westlaw (Beginner)."
+    },
+    {
+        "question": "How many years of experience do entry level regulatory affairs candidates have?",
+        "answer": "Entry level regulatory affairs candidates have 0.0 years of experience.",
+        "contexts": [
+            "years_of_experience: 0.0. core_skills: Regulatory Affairs (Beginner), Brand Marketing (Beginner), FDA (Beginner), Legal Research (Beginner)."
+        ],
+        "ground_truth": "Entry level regulatory affairs candidates have 0.0 years of experience."
+    },
+    {
+        "question": "What is the skill summary for a candidate with regulatory affairs and brand marketing skills?",
+        "answer": "The candidate demonstrates foundational knowledge in regulatory affairs, brand marketing, FDA regulations, and legal research, with competence in research and advising on cosmetics industry topics.",
+        "contexts": [
+            "skill_summary: The candidate demonstrates foundational knowledge in regulatory affairs, brand marketing, FDA regulations, and legal research, with practical experience in researching and advising on cosmetics industry topics."
+        ],
+        "ground_truth": "The candidate demonstrates foundational knowledge in regulatory affairs, brand marketing, FDA regulations, and legal research with competence in research and advising."
+    }
+]

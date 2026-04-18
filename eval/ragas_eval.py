@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 CSV_PATH          = "profiles.csv"        # ← path to your CSV
 GRAPHRAG_BASE_URL = "http://localhost:8000"        # ← your uvicorn server
-CHAT_ENDPOINT     = f"{GRAPHRAG_BASE_URL}/api/chat"
+CHAT_ENDPOINT     = f"{GRAPHRAG_BASE_URL}/api/chat/query"
 
 # Set to True to also generate questions via GPT (costs tokens)
 USE_GPT_QUESTIONS = False

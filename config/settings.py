@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     llm_delay_max: float = Field(default=1.0, description="Maximum delay between LLM requests")
 
     # Document Processing Configuration
-    chunk_size: int = Field(default=1000, description="Document chunk size")
-    chunk_overlap: int = Field(default=200, description="Document chunk overlap")
+    chunk_size: int = Field(default=700, description="Document chunk size")
+    chunk_overlap: int = Field(default=120, description="Document chunk overlap")
 
     # Similarity Configuration
     similarity_threshold: float = Field(default=0.7, description="Similarity threshold")

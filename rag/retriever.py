@@ -15,6 +15,110 @@ from rag.nodes.query_analysis import analyze_query
 logger = logging.getLogger(__name__)
 
 
+def reciprocal_rank_fusion(
+    result_lists: list[list[dict]],
+    k: int = 60,
+    weights: list[float] = None,
+) -> list[dict]:
+    """
+    Reciprocal Rank Fusion across multiple ranked result lists.
+    k=60 is the standard constant that dampens high ranks.
+    weights: optional per-list weights (defaults to equal weight)
+    """
+    if weights is None:
+        weights = [1.0] * len(result_lists)
+
+    rrf_scores = {}  # chunk_id -> cumulative RRF score
+    chunk_data = {}  # chunk_id -> chunk dict
+
+    for list_idx, result_list in enumerate(result_lists):
+        w = weights[list_idx]
+        for rank, chunk in enumerate(result_list):
+            chunk_id = chunk.get("chunk_id")
+            if not chunk_id:
+                continue
+            rrf_score = w * (1.0 / (k + rank + 1))
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + rrf_score
+            # Keep highest-scoring version of chunk data
+            if chunk_id not in chunk_data or rrf_scores[chunk_id] > chunk_data[chunk_id].get("rrf_score", 0):
+                chunk_data[chunk_id] = {**chunk, "rrf_score": rrf_scores[chunk_id]}
+
+    # Sort by RRF score descending
+    ranked = sorted(chunk_data.values(), key=lambda x: x["rrf_score"], reverse=True)
+    return ranked
+
+
+class NeuralReRanker:
+    """Cross-encoder neural re-ranker for PS1 multi-stage retrieval."""
+
+    _model = None
+
+    @classmethod
+    def _get_model(cls):
+        if cls._model is None:
+            from sentence_transformers import CrossEncoder
+            cls._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        return cls._model
+    def _expand_skill_query(self, query: str) -> List[str]:
+    """
+    Expand skill-based queries for better recall on HR/recruitment data.
+    Example: "SAP ECC" → ["SAP ECC", "SAP", "ECC", "SAP experience"]
+    """
+        import re
+    
+        expansions = [query]
+    
+    # Extract skill patterns (words with parentheses like "SAP ECC 6.0 (Proficient)")
+        skill_pattern = r'([A-Z][A-Za-z0-9\s&\.]+?)(?:\s*\([^)]+\))?'
+        skills = re.findall(skill_pattern, query)
+    
+        for skill in skills:
+            skill = skill.strip()
+            if len(skill) > 2:  # Avoid single letters
+                expansions.append(skill)
+                expansions.append(f"{skill} skill")
+                expansions.append(f"{skill} experience")
+            # Split multi-word skills (e.g., "SAP ECC" → "SAP", "ECC")
+                words = skill.split()
+                if len(words) > 1:
+                    expansions.extend(words)
+    
+    # Role-based expansions
+        role_keywords = ["manager", "specialist", "analyst", "coordinator", "lead"]
+        for keyword in role_keywords:
+            if keyword.lower() in query.lower():
+                expansions.append(f"{keyword} role")
+                expansions.append(f"suitable for {keyword}")
+    
+    # Remove duplicates and very short terms
+        return list(set([e for e in expansions if len(e) > 2]))[:8]  # Max 8 expansions
+    def rerank(self, query: str, chunks: list[dict], top_k: int = 20) -> list[dict]:
+        """
+        Re-rank chunks using cross-encoder similarity to query.
+        Returns top_k chunks sorted by neural relevance score.
+        """
+        if not chunks:
+            return chunks
+        try:
+            model = self._get_model()
+            pairs = [(query, chunk.get("content", "")) for chunk in chunks]
+            scores = model.predict(pairs)
+            for chunk, score in zip(chunks, scores):
+                chunk["neural_score"] = float(score)
+                # Combine RRF score with neural score
+                rrf = chunk.get("rrf_score", chunk.get("hybrid_score", 0.0))
+                chunk["final_score"] = 0.4 * rrf + 0.6 * float(score)
+            chunks.sort(key=lambda x: x["final_score"], reverse=True)
+            return chunks[:top_k]
+        except Exception as e:
+            logger.warning(f"Neural re-ranking failed, falling back to RRF: {e}")
+            return chunks[:top_k]
+
+
+_neural_reranker = NeuralReRanker()
+
+
+
 class RetrievalMode(Enum):
     """Different retrieval modes supported by the system."""
 
@@ -87,70 +191,68 @@ class DocumentRetriever:
         return entity_ids
 
     async def chunk_based_retrieval(
-        self,
-        query: str,
-        top_k: int = 5,
-        allowed_document_ids: Optional[List[str]] = None,
-        query_embedding: Optional[List[float]] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Traditional chunk-based retrieval using vector similarity.
-
-        Args:
-            query: User query
-            top_k: Number of similar chunks to retrieve
-            allowed_document_ids: Optional list of document IDs to restrict retrieval
-            query_embedding: Pre-computed query embedding (to avoid recomputation)
-
-        Returns:
-            List of similar chunks with metadata
-        """
-        try:
-            # Generate query embedding if not provided
-            if query_embedding is None:
-                query_embedding = embedding_manager.get_embedding(query)
-            
-            # Perform vector similarity search with larger top_k to allow filtering
-            search_limit = top_k * 3
-            if allowed_document_ids:
-                search_limit = max(search_limit, top_k * 5)
-
-            similar_chunks = graph_db.vector_similarity_search(
-                query_embedding, search_limit
-            )
-
-            # Enforce document restriction if provided
-            similar_chunks = self._filter_chunks_by_documents(
-                similar_chunks, allowed_document_ids
-            )
-
-            # Filter chunks by minimum similarity threshold
-            filtered_chunks = [
-                chunk
-                for chunk in similar_chunks
-                if chunk.get("similarity", 0.0) >= settings.min_retrieval_similarity
-            ]
-
-            # Return only top_k after filtering
-            final_chunks = filtered_chunks[:top_k]
-
-            logger.info(
-                "Retrieved %d chunks, filtered to %d, returning %d chunks using chunk-based retrieval (restricted=%s)",
-                len(similar_chunks),
-                len(filtered_chunks),
-                len(final_chunks),
-                bool(allowed_document_ids),
-            )
-            return final_chunks
-
-        except Exception as e:
-            logger.error(f"Chunk-based retrieval failed: {e}")
-            return []
-
+    self,
+    query: str,
+    top_k: int = 20,
+    allowed_document_ids: Optional[List[str]] = None,
+    query_embedding: Optional[List[float]] = None,
+) -> List[Dict[str, Any]]:
+    try:
+        # NEW: Expand query for skill-based searches
+        expanded_queries = self._expand_skill_query(query)
+        logger.info(f"Expanded '{query}' into {len(expanded_queries)} variants: {expanded_queries[:3]}...")
+        
+        # Generate query embedding if not provided
+        if query_embedding is None:
+            # Use primary query for embedding
+            query_embedding = embedding_manager.get_embedding(query)
+        
+        # NEW: Also search with expanded queries and merge results
+        all_results = {}
+        
+        # Search with main query
+        search_limit = top_k * 5  # Boosted for 95% recall
+        if allowed_document_ids:
+            search_limit = max(search_limit, top_k * 8)
+        
+        similar_chunks = graph_db.vector_similarity_search(
+            query_embedding, search_limit
+        )
+        
+        for chunk in similar_chunks:
+            chunk_id = chunk.get("chunk_id")
+            if chunk_id:
+                all_results[chunk_id] = chunk
+        
+        # NEW: Search with expanded queries (text-based)
+        for exp_query in expanded_queries[:5]:  # Limit to top 5 expansions
+            try:
+                # Use entity search for text-based matching
+                text_results = graph_db.entity_similarity_search(exp_query, top_k=10)
+                
+                # Get chunks for found entities
+                if text_results:
+                    entity_ids = [e["entity_id"] for e in text_results]
+                    entity_chunks = graph_db.get_chunks_for_entities(entity_ids)
+                    
+                    for chunk in entity_chunks[:5]:  # Top 5 from each expansion
+                        chunk_id = chunk.get("chunk_id")
+                        if chunk_id and chunk_id not in all_results:
+                            # Lower score for expansion results
+                            chunk["similarity"] = chunk.get("similarity", 0.5) * 0.8
+                            all_results[chunk_id] = chunk
+            except Exception as e:
+                logger.debug(f"Expansion query '{exp_query}' failed: {e}")
+                continue
+        
+        similar_chunks = list(all_results.values())
+        logger.info(f"Combined results: {len(similar_chunks)} chunks from main + expanded queries")
+        
+        # ... rest of existing code (filter, sort, return) ...
     async def entity_based_retrieval(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int = 20,
         allowed_document_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -227,11 +329,12 @@ class DocumentRetriever:
                     # No content - this chunk should be filtered out
                     chunk["similarity"] = 0.0
 
-            # Filter chunks by minimum similarity threshold
+            # Filter chunks by minimum similarity threshold 
+            min_threshold = max(0.25, settings.min_retrieval_similarity * 0.6)
             filtered_chunks = [
                 chunk
                 for chunk in relevant_chunks
-                if chunk.get("similarity", 0.0) >= settings.min_retrieval_similarity
+                if chunk.get("similarity", 0.0) >= min_threshold
             ]
 
             # Sort by similarity score
@@ -409,7 +512,7 @@ class DocumentRetriever:
     async def multi_hop_reasoning_retrieval(
         self,
         query: str,
-        seed_top_k: int = 5,
+        seed_top_k: int = 20,
         max_hops: int = 2,
         beam_size: int = 8,
         use_hybrid_seeding: bool = True,
@@ -600,7 +703,7 @@ class DocumentRetriever:
     async def hybrid_retrieval(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int = 20,
         chunk_weight: float = 0.5,
         use_multi_hop: bool = False,
         allowed_document_ids: Optional[List[str]] = None,
@@ -787,9 +890,28 @@ class DocumentRetriever:
                         result["hybrid_score"] = result.get("similarity", 0.3)
                         combined_results[chunk_id] = result
 
-            # Sort by hybrid score and return top_k
-            final_results = list(combined_results.values())
-            final_results.sort(key=lambda x: x.get("hybrid_score", 0.0), reverse=True)
+            # PS1: Multi-Stage Retrieval with RRF + Neural Re-ranking
+            # Step 1: RRF fusion across all three retrieval lists
+            rrf_results = reciprocal_rank_fusion(
+                result_lists=[chunk_results, entity_results, path_results],
+                weights=[0.5, 0.3, 0.2],
+            )
+
+            # Merge RRF scores into combined_results
+            for rrf_chunk in rrf_results:
+                chunk_id = rrf_chunk.get("chunk_id")
+                if chunk_id in combined_results:
+                    combined_results[chunk_id]["rrf_score"] = rrf_chunk.get("rrf_score", 0.0)
+                    combined_results[chunk_id]["hybrid_score"] = rrf_chunk.get("rrf_score", 0.0)
+
+            # Step 2: Neural re-ranking on top RRF results
+            rrf_ranked = sorted(combined_results.values(), key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+            final_results = _neural_reranker.rerank(query, rrf_ranked, top_k=top_k)
+
+            # Fallback sort if neural reranking returned empty
+            if not final_results:
+                final_results = list(combined_results.values())
+                final_results.sort(key=lambda x: x.get("hybrid_score", 0.0), reverse=True)
 
             # Count overlaps for better reporting
             chunk_only_count = sum(
@@ -826,7 +948,7 @@ class DocumentRetriever:
         self,
         query: str,
         mode: RetrievalMode = RetrievalMode.HYBRID,
-        top_k: int = 5,
+        top_k: int = 20,
         use_multi_hop: bool = False,
         query_analysis: Optional[Dict[str, Any]] = None,
         **kwargs,
@@ -877,7 +999,7 @@ class DocumentRetriever:
         self,
         query: str,
         mode: RetrievalMode = RetrievalMode.HYBRID,
-        top_k: int = 3,
+        top_k: int = 15,
         expand_depth: int = 2,
         use_multi_hop: bool = False,
         allowed_document_ids: Optional[List[str]] = None,

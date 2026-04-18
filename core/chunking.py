@@ -5,7 +5,7 @@ Document chunking utilities with OCR and quality assessment.
 import logging
 from typing import Any, Dict, List, Optional
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.settings import settings
 from core.ocr import ocr_processor
